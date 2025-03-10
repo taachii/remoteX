@@ -21,7 +21,10 @@ import com.example.remotex.ui.theme.RemoteXTheme
 import org.json.JSONObject
 import java.net.DatagramPacket
 import java.net.DatagramSocket
+import java.net.Inet4Address
 import java.net.InetAddress
+import java.net.NetworkInterface
+import java.util.*
 import java.util.zip.Deflater
 
 class MainActivity : ComponentActivity() {
@@ -29,8 +32,9 @@ class MainActivity : ComponentActivity() {
     private var serverAddress: InetAddress? = null
     private val serverPort = 5000
     private var isConnected by mutableStateOf(false)
-    private val sensitivity = 2.5f  // Zwiększona czułość
-    private val sendInterval = 20L  // Wysyłaj dane co 20 ms
+    var isServerAlive by mutableStateOf(true)
+    private val sensitivity = 0.6f
+    private val sendInterval = 20L
     private var lastSendTime = 0L
     private var accumulatedDx = 0f
     private var accumulatedDy = 0f
@@ -52,22 +56,129 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private fun isInSameNetwork(phoneIp: String, serverIp: String): Boolean {
+        val phoneOctets = phoneIp.split(".").take(3)
+        val serverOctets = serverIp.split(".").take(3)
+        return phoneOctets == serverOctets
+    }
+
+    private fun getLocalIpAddress(): String? {
+        return try {
+            val interfaces = Collections.list(NetworkInterface.getNetworkInterfaces())
+            for (intf in interfaces) {
+                val addrs = Collections.list(intf.inetAddresses)
+                for (addr in addrs) {
+                    if (!addr.isLoopbackAddress && addr is Inet4Address) {
+                        return addr.hostAddress
+                    }
+                }
+            }
+            null
+        } catch (e: Exception) {
+            null
+        }
+    }
+
     private fun connectToServer(ipAddress: String) {
         Thread {
             try {
-                serverAddress = InetAddress.getByName(ipAddress)
+                // Sprawdź, czy adres IP jest w tej samej sieci
+                val phoneIp = getLocalIpAddress()
+                if (phoneIp == null || !isInSameNetwork(phoneIp, ipAddress)) {
+                    runOnUiThread {
+                        Toast.makeText(
+                            this@MainActivity,
+                            "Adres IP nie znajduje się w tej samej sieci co telefon",
+                            Toast.LENGTH_SHORT
+                        ).show()
+                    }
+                    return@Thread
+                }
+
+                // Sprawdź, czy serwer jest dostępny
+                val serverAddr = InetAddress.getByName(ipAddress)
+                val testSocket = DatagramSocket()
+                testSocket.soTimeout = 2000  // Czekaj na odpowiedź przez 2 sekundy
+
+                // Wyślij pakiet "ping"
+                val pingData = "ping".toByteArray()
+                val pingPacket = DatagramPacket(pingData, pingData.size, serverAddr, serverPort)
+                testSocket.send(pingPacket)
+
+                // Odbierz odpowiedź "pong"
+                val responseBuffer = ByteArray(1024)
+                val responsePacket = DatagramPacket(responseBuffer, responseBuffer.size)
+                testSocket.receive(responsePacket)
+
+                val response = String(responsePacket.data, 0, responsePacket.length)
+                if (response != "pong") {
+                    runOnUiThread {
+                        Toast.makeText(
+                            this@MainActivity,
+                            "Serwer nie odpowiada. Upewnij się, że serwer jest uruchomiony.",
+                            Toast.LENGTH_SHORT
+                        ).show()
+                    }
+                    testSocket.close()
+                    return@Thread
+                }
+
+                testSocket.close()
+
+                // Połącz się z serwerem
+                serverAddress = serverAddr
                 socket = DatagramSocket()
                 isConnected = true
+                isServerAlive = true
 
                 runOnUiThread {
                     Toast.makeText(this@MainActivity, "Połączono z serwerem", Toast.LENGTH_SHORT).show()
-                    requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
                 }
+
+                // Rozpocznij monitorowanie stanu serwera
+                checkServerAlive()
             } catch (e: Exception) {
                 e.printStackTrace()
                 runOnUiThread {
-                    Toast.makeText(this@MainActivity, "Błąd połączenia z serwerem: ${e.message}", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(
+                        this@MainActivity,
+                        "Błąd połączenia z serwerem: ${e.message}",
+                        Toast.LENGTH_SHORT
+                    ).show()
                 }
+            }
+        }.start()
+    }
+
+    private fun checkServerAlive() {
+        Thread {
+            while (isConnected) {
+                try {
+                    val pingData = "ping".toByteArray()
+                    val pingPacket = DatagramPacket(
+                        pingData,
+                        pingData.size,
+                        serverAddress,
+                        serverPort
+                    )
+                    socket?.send(pingPacket)
+
+                    val responseBuffer = ByteArray(1024)
+                    val responsePacket = DatagramPacket(responseBuffer, responseBuffer.size)
+                    socket?.soTimeout = 2000
+                    socket?.receive(responsePacket)
+
+                    val response = String(responsePacket.data, 0, responsePacket.length)
+                    if (response == "pong") {
+                        isServerAlive = true
+                    }
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                    isServerAlive = false
+                    disconnectFromServer()
+                    break
+                }
+                Thread.sleep(5000)
             }
         }.start()
     }
@@ -77,6 +188,7 @@ class MainActivity : ComponentActivity() {
             try {
                 socket?.close()
                 isConnected = false
+                isServerAlive = false
 
                 runOnUiThread {
                     Toast.makeText(this@MainActivity, "Rozłączono z serwerem", Toast.LENGTH_SHORT).show()
@@ -103,7 +215,7 @@ class MainActivity : ComponentActivity() {
     }
 
     fun sendDataToServer(deltaX: Float, deltaY: Float) {
-        if (!isConnected) return
+        if (!isConnected || socket == null || serverAddress == null) return
 
         accumulatedDx += deltaX * sensitivity
         accumulatedDy += deltaY * sensitivity
@@ -116,7 +228,6 @@ class MainActivity : ComponentActivity() {
                     val dy = accumulatedDy.toInt()
 
                     if (dx != 0 || dy != 0) {
-                        // Tworzenie JSON za pomocą org.json
                         val jsonData = JSONObject().apply {
                             put("dx", dx)
                             put("dy", dy)
@@ -182,6 +293,13 @@ fun StartScreen(onConnectClicked: (String) -> Unit) {
 @Composable
 fun TouchPadScreen(onDisconnect: () -> Unit) {
     val context = LocalContext.current
+    val activity = context as MainActivity
+
+    LaunchedEffect(activity.isServerAlive) {
+        if (!activity.isServerAlive) {
+            onDisconnect()
+        }
+    }
 
     Box(
         modifier = Modifier
@@ -190,7 +308,7 @@ fun TouchPadScreen(onDisconnect: () -> Unit) {
             .pointerInput(Unit) {
                 detectDragGestures { _, dragAmount ->
                     val (dx, dy) = dragAmount
-                    (context as MainActivity).sendDataToServer(dx, dy)
+                    activity.sendDataToServer(dx, dy)
                 }
             }
     ) {
