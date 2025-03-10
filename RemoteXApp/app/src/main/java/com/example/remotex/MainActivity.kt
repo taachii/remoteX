@@ -7,6 +7,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
@@ -33,7 +34,7 @@ class MainActivity : ComponentActivity() {
     private val serverPort = 5000
     private var isConnected by mutableStateOf(false)
     var isServerAlive by mutableStateOf(true)
-    private val sensitivity = 0.6f
+    private val sensitivity = 0.7f
     private val sendInterval = 20L
     private var lastSendTime = 0L
     private var accumulatedDx = 0f
@@ -82,7 +83,6 @@ class MainActivity : ComponentActivity() {
     private fun connectToServer(ipAddress: String) {
         Thread {
             try {
-                // Sprawdź, czy adres IP jest w tej samej sieci
                 val phoneIp = getLocalIpAddress()
                 if (phoneIp == null || !isInSameNetwork(phoneIp, ipAddress)) {
                     runOnUiThread {
@@ -95,17 +95,14 @@ class MainActivity : ComponentActivity() {
                     return@Thread
                 }
 
-                // Sprawdź, czy serwer jest dostępny
                 val serverAddr = InetAddress.getByName(ipAddress)
                 val testSocket = DatagramSocket()
-                testSocket.soTimeout = 2000  // Czekaj na odpowiedź przez 2 sekundy
+                testSocket.soTimeout = 2000
 
-                // Wyślij pakiet "ping"
                 val pingData = "ping".toByteArray()
                 val pingPacket = DatagramPacket(pingData, pingData.size, serverAddr, serverPort)
                 testSocket.send(pingPacket)
 
-                // Odbierz odpowiedź "pong"
                 val responseBuffer = ByteArray(1024)
                 val responsePacket = DatagramPacket(responseBuffer, responseBuffer.size)
                 testSocket.receive(responsePacket)
@@ -125,7 +122,6 @@ class MainActivity : ComponentActivity() {
 
                 testSocket.close()
 
-                // Połącz się z serwerem
                 serverAddress = serverAddr
                 socket = DatagramSocket()
                 isConnected = true
@@ -135,7 +131,6 @@ class MainActivity : ComponentActivity() {
                     Toast.makeText(this@MainActivity, "Połączono z serwerem", Toast.LENGTH_SHORT).show()
                 }
 
-                // Rozpocznij monitorowanie stanu serwera
                 checkServerAlive()
             } catch (e: Exception) {
                 e.printStackTrace()
@@ -257,6 +252,34 @@ class MainActivity : ComponentActivity() {
             }.start()
         }
     }
+
+    fun sendTapToServer() {
+        if (!isConnected || socket == null || serverAddress == null) return
+
+        Thread {
+            try {
+                val jsonData = JSONObject().apply {
+                    put("action", "tap")
+                }.toString()
+                val data = jsonData.toByteArray(Charsets.UTF_8)
+                val compressedData = compressData(data)
+
+                val packet = DatagramPacket(
+                    compressedData,
+                    compressedData.size,
+                    serverAddress,
+                    serverPort
+                )
+                socket?.send(packet)
+            } catch (e: Exception) {
+                e.printStackTrace()
+                runOnUiThread {
+                    Toast.makeText(this@MainActivity, "Błąd przesyłania danych: ${e.message}", Toast.LENGTH_SHORT).show()
+                }
+                disconnectFromServer()
+            }
+        }.start()
+    }
 }
 
 @Composable
@@ -310,6 +333,13 @@ fun TouchPadScreen(onDisconnect: () -> Unit) {
                     val (dx, dy) = dragAmount
                     activity.sendDataToServer(dx, dy)
                 }
+            }
+            .pointerInput(Unit) {
+                detectTapGestures(
+                    onTap = { offset ->
+                        activity.sendTapToServer()
+                    }
+                )
             }
     ) {
         Column(
