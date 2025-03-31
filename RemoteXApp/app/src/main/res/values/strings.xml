@@ -1,3 +1,19 @@
 <resources>
+    <string name="ok">OK</string>
     <string name="app_name">RemoteX</string>
+    <string name="server_ip_hint">Adres IP komputera</string>
+    <string name="connect_button">Połącz</string>
+    <string name="disconnect_button">Rozłącz</string>
+    <string name="network_mismatch_error">Adres IP nie znajduje się w tej samej sieci co telefon</string>
+    <string name="connection_success">Połączono z serwerem</string>
+    <string name="connection_error">Błąd połączenia z serwerem: %s</string>
+    <string name="connection_error_title">Błąd połączenia</string>
+    <string name="connection_lost">Utracono połączenie z serwerem</string>
+    <string name="server_unreachable">Serwer nie odpowiada. Upewnij się, że serwer jest uruchomiony.</string>
+    <string name="media_play">Odtwarzaj</string>
+    <string name="media_pause">Pauza</string>
+    <string name="media_next">Następny</string>
+    <string name="media_prev">Poprzedni</string>
+    <string name="volume_up">Głośniej</string>
+    <string name="volume_down">Ciszej</string>
 </resources>
