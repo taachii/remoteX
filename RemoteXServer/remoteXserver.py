@@ -1,7 +1,6 @@
 import socket
 import pyautogui
 import json
-import zlib
 import tkinter as tk
 from tkinter import scrolledtext, font, messagebox
 import threading
@@ -19,29 +18,38 @@ def get_local_ip():
 
 def control_cursor(data):
     try:
-        decompressed_data = zlib.decompress(data).decode('utf-8')
-        data_dict = json.loads(decompressed_data)
+        data_dict = json.loads(data)
 
-        if data_dict.get("action") == "tap":
-            # Symuluj kliknięcie LPM
+        if data_dict.get("action") == "media":
+            handle_media_command(data_dict.get("command"))
+        elif data_dict.get("action") == "tap":
             pyautogui.click()
+        elif data_dict.get("action") == "right_click":
+            pyautogui.rightClick()
         else:
-            # Obsługa ruchu kursora
             dx = data_dict.get('dx', 0)
             dy = data_dict.get('dy', 0)
-
+            
             if dx != 0 or dy != 0:
                 current_x, current_y = pyautogui.position()
-                new_x = current_x + dx
-                new_y = current_y + dy
-
-                screen_width, screen_height = pyautogui.size()
-                new_x = max(10, min(new_x, screen_width - 10))
-                new_y = max(10, min(new_y, screen_height - 10))
-
+                new_x = max(10, min(current_x + dx, pyautogui.size()[0] - 10))
+                new_y = max(10, min(current_y + dy, pyautogui.size()[1] - 10))
                 pyautogui.moveTo(new_x, new_y)
+                
     except Exception as e:
-        log_message(f"Błąd podczas przetwarzania danych: {e}", "error")
+        log_message(f"Błąd przetwarzania: {e}", "error")
+
+def handle_media_command(command):
+    if command == "play_pause":
+        pyautogui.press('playpause')
+    elif command == "next":
+        pyautogui.press('nexttrack')
+    elif command == "previous":
+        pyautogui.press('prevtrack')
+    elif command == "volume_up":
+        pyautogui.press('volumeup')
+    elif command == "volume_down":
+        pyautogui.press('volumedown')
 
 def log_message(message, message_type="info"):
     if message_type == "info":
@@ -102,11 +110,6 @@ def stop_server():
 root = tk.Tk()
 root.title("RemoteX Server")
 root.geometry("900x600")
-
-try:
-    root.iconbitmap('icon.ico')
-except:
-    pass
 
 custom_font = font.Font(family="Helvetica", size=12)
 
